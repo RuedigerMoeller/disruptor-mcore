@@ -1,7 +1,7 @@
 disruptor-mcore
 ===============
 
-a benchmark simulating a event processing server/component.
+a benchmark simulating an event processing server/component.
 One solution uses disruptor and splits processing of each request onto several threads 
 N for decoding, 1 for processing request logic, M for encoding.
 The other solution uses regualar ThreadPool to schedule requests to several threads.
