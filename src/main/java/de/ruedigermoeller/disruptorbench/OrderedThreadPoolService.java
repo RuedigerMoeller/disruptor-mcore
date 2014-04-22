@@ -4,12 +4,13 @@ import de.ruedigermoeller.serialization.FSTConfiguration;
 
 import java.io.IOException;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 /**
  * Created by ruedi on 21.04.14.
  */
-public class UnorderedThreadPoolService implements Service {
+public class OrderedThreadPoolService implements Service {
 
     static FSTConfiguration conf = FSTConfiguration.getDefaultConfiguration();
     private LoadFeeder serv;
@@ -31,7 +32,7 @@ public class UnorderedThreadPoolService implements Service {
 
     SharedData sharedData;
 
-    public UnorderedThreadPoolService(LoadFeeder serv, SharedData data, int numWorkers) {
+    public OrderedThreadPoolService(LoadFeeder serv, SharedData data, int numWorkers) {
         this.serv = serv;
         init(numWorkers);
         sharedData = data;
@@ -39,16 +40,13 @@ public class UnorderedThreadPoolService implements Service {
 
     public void init(int workers) {
         executor = (ExecutorService) createBoundedThreadExecutor(workers, "pool", 40000);
-//        executor = Executors.newFixedThreadPool(workers,new ThreadFactory() {
-//            @Override
-//            public Thread newThread(Runnable r) {
-//                return new TestThread( r, "-" );
-//            }
-//        });
     }
 
+    AtomicInteger processedSequence = new AtomicInteger(0);
+    int inSequence = 0;
     @Override
     public void processRequest(final byte[] rawRequest) {
+        final int seq = inSequence++;
         executor.execute(new Runnable() {
             @Override
             public void run() {
@@ -56,7 +54,11 @@ public class UnorderedThreadPoolService implements Service {
                     final TestRequestEntry testRequest = ((TestThread)Thread.currentThread()).req;
                     testRequest.rawRequest = rawRequest;
                     testRequest.decode();
+                    // ensure in-sequence processing
+                    while(processedSequence.get() != seq)
+                        Thread.yield();
                     testRequest.process(sharedData);
+                    processedSequence.incrementAndGet();
                     testRequest.encode(serv);
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -99,8 +101,8 @@ public class UnorderedThreadPoolService implements Service {
             long sum = 0;
             for (int i = 0; i < RUN + WARMUP; i++) {
                 LoadFeeder feeder = new LoadFeeder(10000);
-//                UnorderedThreadPoolService service = new UnorderedThreadPoolService(feeder, new LockFreeSharedData(), ii);
-                UnorderedThreadPoolService service = new UnorderedThreadPoolService(feeder,new SynchronizedSharedData(), ii);
+//                OrderedThreadPoolService service = new OrderedThreadPoolService(feeder, new LockFreeSharedData(), ii);
+                OrderedThreadPoolService service = new OrderedThreadPoolService(feeder,new SynchronizedSharedData(), ii);
                 long run = feeder.run(service, 1000 * 1000);
                 if (i > WARMUP) {
                     sum += run;
