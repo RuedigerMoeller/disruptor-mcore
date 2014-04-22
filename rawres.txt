@@ -1,0 +1,35 @@
+Laptop i7 win 1.8_05
+
+result (1):831
+result (2):582
+result (3):445
+result (4):385
+result (5):465
+result (6):453
+result (7):504
+result (8):508
+
+result: (dec:1, enc:1)538
+result: (dec:2, enc:1)453
+result: (dec:2, enc:2)436
+result: (dec:3, enc:2)392
+result: (dec:3, enc:3)405
+result: (dec:4, enc:3)389
+result: (dec:4, enc:4)397
+
+result: (dec:1, enc:1)1947
+result: (dec:2, enc:1)1514
+result: (dec:2, enc:2)1454
+result: (dec:3, enc:2)1269
+result: (dec:3, enc:3)1275
+result: (dec:4, enc:3)1257
+result: (dec:4, enc:4)1311
+
+result (1):2667
+result (2):1631
+result (3):1325
+result (4):1131
+result (5):1341
+result (6):1391
+result (7):1548
+result (8):1880
