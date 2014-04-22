@@ -18,6 +18,10 @@ public class TestRequestEntry {
     static FSTConfiguration confRead = FSTConfiguration.createDefaultConfiguration();
     static FSTConfiguration confWrite = FSTConfiguration.createDefaultConfiguration();
 
+    static {
+        confRead.setShareReferences(false);
+        confWrite.setShareReferences(false);
+    }
     // used for partitioning encoding/decoding in disruptor
     public int decPartition;
     public int encPartition;
