@@ -9,7 +9,7 @@ The other solution uses regualar ThreadPool to schedule requests to several thre
 Both solutions ensure that requests are processed in order of arrival despite going parallel.
 
 Run *DisruptorService.main* for disruptor results, 
-*UnorderedThreadPoolService.main* for traditional multithreading results.
+*OrderedThreadPoolService.main* for traditional multithreading results.
 Differences depend a lot on hardware platform, additionally the more work is put into encoding 
 (simulated by adding some dummy hashmap to each request), the better the scaling of the threading solution. For small
 units of work, disruptor performs better. Disruptor has most probably lower latency as it splits processing per individual request, however latency is not measured.
