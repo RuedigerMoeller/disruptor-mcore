@@ -1,9 +1,6 @@
 package de.ruedigermoeller.disruptorbench;
 
-import com.lmax.disruptor.EventFactory;
-import com.lmax.disruptor.EventHandler;
-import com.lmax.disruptor.RingBuffer;
-import com.lmax.disruptor.SleepingWaitStrategy;
+import com.lmax.disruptor.*;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 
@@ -18,8 +15,6 @@ import java.util.concurrent.locks.LockSupport;
  * Created by ruedi on 20.04.14.
  */
 public class DisruptorService implements Service {
-
-    static AtomicInteger decount = new AtomicInteger(0); // debug
 
     public static class DSEventFac implements EventFactory<TestRequestEntry> {
         @Override
@@ -61,7 +56,8 @@ public class DisruptorService implements Service {
     void initDisruptor(final LoadFeeder feeder) {
         if ( executor == null )
             executor = Executors.newCachedThreadPool();
-        disruptor = new Disruptor<>(new DSEventFac(), 32768, executor, ProducerType.SINGLE, new SleepingWaitStrategy());
+//        disruptor = new Disruptor<>(new DSEventFac(), 65536, executor, ProducerType.SINGLE, new BusySpinWaitStrategy());
+        disruptor = new Disruptor<>(new DSEventFac(), 16384/4, executor, ProducerType.SINGLE, new BusySpinWaitStrategy());
 //        DSPartitionedProcessor decoders[] = new DSPartitionedProcessor[codingThreads];
         DSPartitionedProcessor decoders[] = new DSPartitionedProcessor[numDecodingThreads];
         for (int i = 0; i < decoders.length; i++) {
@@ -134,7 +130,7 @@ public class DisruptorService implements Service {
                 LoadFeeder feeder = new LoadFeeder(10000);
                 DisruptorService service = new DisruptorService(feeder, threads[0], threads[1], new SingleThreadedSharedData());
                 long run = feeder.run(service, 1000 * 1000);
-                if (i > WARMUP) {
+                if (i >= WARMUP) {
                     sum+=run;
                 }
             }

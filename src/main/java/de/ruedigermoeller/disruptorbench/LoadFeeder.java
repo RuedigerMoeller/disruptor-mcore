@@ -17,7 +17,7 @@ import java.util.concurrent.locks.LockSupport;
  * 1 DisruptorService scheduling N threads for decoding an M threads for encoding. Only one thread does actual processing, so
  *   'business logic' is singlethreaded (no locking required).
  * 2 ThreadPool based Service scheduling N threads. Each thread does all 3 steps (decode, process, encode) at the price of having to
- *   synchronize in when accessing shared data in business logic
+ *   synchronize when accessing shared data in business logic and have to spin wait on an atomic to keep sequence
  */
 public class LoadFeeder {
 
@@ -88,6 +88,7 @@ public class LoadFeeder {
             LockSupport.parkNanos(10000);
         long res = System.currentTimeMillis() - tim;
         service.shutdown();
+//        System.out.println(res);
         return res;
     }
 

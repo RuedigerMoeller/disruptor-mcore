@@ -39,7 +39,7 @@ public class OrderedThreadPoolService implements Service {
     }
 
     public void init(int workers) {
-        executor = (ExecutorService) createBoundedThreadExecutor(workers, "pool", 40000);
+        executor = (ExecutorService) createBoundedThreadExecutor(workers, "pool", 4*4096);
     }
 
     AtomicInteger processedSequence = new AtomicInteger(0);
@@ -56,7 +56,8 @@ public class OrderedThreadPoolService implements Service {
                     testRequest.decode();
                     // ensure in-sequence processing
                     while(processedSequence.get() != seq)
-                        Thread.yield();
+//                        Thread.yield();
+                    ;
                     testRequest.process(sharedData);
                     processedSequence.incrementAndGet();
                     testRequest.encode(serv);
@@ -104,7 +105,7 @@ public class OrderedThreadPoolService implements Service {
 //                OrderedThreadPoolService service = new OrderedThreadPoolService(feeder, new LockFreeSharedData(), ii);
                 OrderedThreadPoolService service = new OrderedThreadPoolService(feeder,new SynchronizedSharedData(), ii);
                 long run = feeder.run(service, 1000 * 1000);
-                if (i > WARMUP) {
+                if (i >= WARMUP) {
                     sum += run;
                 }
             }
