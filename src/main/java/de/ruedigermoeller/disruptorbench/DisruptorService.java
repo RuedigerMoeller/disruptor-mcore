@@ -125,8 +125,8 @@ public class DisruptorService implements Service {
                 { 4, 4 },
         };
 
-        int WARMUP = 5;
-        int RUN = 10;
+        int WARMUP = 10;
+        int RUN = 50;
         for (int ii = 0; ii < threadDistributions2Test.length; ii++) {
             int[] threads = threadDistributions2Test[ii];
             long sum = 0;
