@@ -97,7 +97,7 @@ public class OrderedThreadPoolService implements Service {
     public static void main(String a[]) throws IOException, ClassNotFoundException {
         int WARMUP = 5;
         int RUN = 10;
-        for ( int ii=1; ii < 9; ii++ ) {
+        for ( int ii=1; ii < 10; ii++ ) {
             long sum = 0;
             for (int i = 0; i < RUN + WARMUP; i++) {
                 LoadFeeder feeder = new LoadFeeder(10000);

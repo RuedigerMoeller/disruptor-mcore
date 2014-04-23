@@ -33,7 +33,7 @@ public class TestRequestEntry {
     // can be multithreaded
     public void decode() throws Exception {
         final FSTObjectInput objectInput = confRead.getObjectInput(rawRequest);
-        req = (LoadFeeder.Request) objectInput.readObject();
+        req = (LoadFeeder.Request) objectInput.readObject(LoadFeeder.Request.class);
     }
 
     // single threaded or need synchronization in the SharedData implementation
@@ -41,7 +41,7 @@ public class TestRequestEntry {
         Integer result = data.lookup(req.data);
         if ( result == null )
             result = 0;
-        // just mimic some simple business logic involving some alloc
+        // just mimic some simple business logic
         for (int i = 0; i < 20; i++) {
             Date d = new Date(result);
             result = (int) d.getTime();
@@ -52,7 +52,7 @@ public class TestRequestEntry {
     // can be multithreaded
     public void encode(LoadFeeder serv) throws Exception {
         FSTObjectOutput out = confWrite.getObjectOutput((OutputStream) null);
-        out.writeObject(resp);
+        out.writeObject(resp, LoadFeeder.Response.class);
         serv.response(out.getCopyOfWrittenBuffer());
         out.flush();
     }

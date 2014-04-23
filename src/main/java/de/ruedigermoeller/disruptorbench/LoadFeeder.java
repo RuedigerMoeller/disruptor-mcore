@@ -65,7 +65,7 @@ public class LoadFeeder {
         requests = new byte[numberOfRequests][];
         for (int i = 0; i < requests.length; i++) {
             final FSTObjectOutput objectOutput = FSTConfiguration.getDefaultConfiguration().getObjectOutput();
-            objectOutput.writeObject(new Request("hello"+i,i));
+            objectOutput.writeObject(new Request("hello"+i,i), Request.class);
             requests[i] = objectOutput.getCopyOfWrittenBuffer();
             objectOutput.flush();
         }

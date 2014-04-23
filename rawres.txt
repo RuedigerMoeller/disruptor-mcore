@@ -1,35 +1,37 @@
 Laptop i7 win 1.8_05
 
-result (1):831
-result (2):582
-result (3):445
-result (4):385
-result (5):465
-result (6):453
-result (7):504
-result (8):508
+result (1):510
+result (2):422
+result (3):337
+result (4):338
+result (5):404
+result (6):450
+result (7):510
+result (8):462
+result (9):566
 
-result: (dec:1, enc:1)538
-result: (dec:2, enc:1)453
-result: (dec:2, enc:2)436
-result: (dec:3, enc:2)392
-result: (dec:3, enc:3)405
-result: (dec:4, enc:3)389
-result: (dec:4, enc:4)397
+result: (dec:1, enc:1)293
+result: (dec:2, enc:1)271
+result: (dec:2, enc:2)262
+result: (dec:3, enc:2)277
+result: (dec:3, enc:3)302
+result: (dec:4, enc:3)294
+result: (dec:4, enc:4)303
 
-result: (dec:1, enc:1)1947
-result: (dec:2, enc:1)1514
-result: (dec:2, enc:2)1454
-result: (dec:3, enc:2)1269
-result: (dec:3, enc:3)1275
-result: (dec:4, enc:3)1257
-result: (dec:4, enc:4)1311
+result: (dec:1, enc:1)1645
+result: (dec:2, enc:1)1291
+result: (dec:2, enc:2)1240
+result: (dec:3, enc:2)1191
+result: (dec:3, enc:3)1196
+result: (dec:4, enc:3)1163
+result: (dec:4, enc:4)1197
 
-result (1):2667
-result (2):1631
-result (3):1325
+result (1):2166
+result (2):1482
+result (3):1151
 result (4):1131
-result (5):1341
-result (6):1391
-result (7):1548
-result (8):1880
+result (5):1309
+result (6):1428
+result (7):1635
+result (8):2018
+result (9):2491
