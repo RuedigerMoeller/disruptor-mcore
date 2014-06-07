@@ -2,7 +2,6 @@ package de.ruedigermoeller.experiment;
 
 import com.lmax.disruptor.*;
 
-import java.util.BitSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -44,23 +43,29 @@ public class Scheduler {
 
     }
 
-    class DispatcherHandler implements EventHandler<EventEntry> {
+    enum DispacherState {
+        UNSCHEDULED, // not used
+        IN_ADD, // added but not used
+        SCHEDULED, // runs normally
+        IN_REMOVE, // trying to remove
+    }
 
-        public byte clearActorBit;
-        public byte setActorBit;
+    class DispatcherHandler implements EventHandler<EventEntry> {
 
         public long idMask;             // bitmask which actors to process
         public long transitionalIdMask; // bitmask which actors are about to leave
-        long timeCounters[] = new long[64];
-        long load = 0;
-        int profileTick = 0;
-        int eventTick = 0;
-        int scheduleTick = 0;
+
+        long timeCounters[] = new long[64]; // holds profiling data
+        long load = 0;                      // acummulated load of handler
+
+        int profileTick = 0;                // counter when to profile again
+        int eventTick = 0;                  // ticker incremented for each event happening
+        int scheduleTick = 0;               // counter when to check actor rescheduling
         int emptyCount = 0;
         int num;
         int dispatcherScheduleTick = 0;
-        int removeCandidateCount = 0;
         DispatcherHandler handlers[];
+        private DispacherState state = DispacherState.UNSCHEDULED;
 
         DispatcherHandler(int num, DispatcherHandler[] handlers) {
             this.num = num;
@@ -70,6 +75,7 @@ public class Scheduler {
         @Override
         public String toString() {
             return "DispatcherHandler{" +
+                    "state=" + state +
                     "num=" + num +
                     ", load=\t" + load +
                     ", idMask=\t" + Long.toBinaryString(idMask) +
@@ -78,36 +84,68 @@ public class Scheduler {
 
         @Override
         public void onEvent(EventEntry ev, long sequence, boolean endOfBatch) throws Exception {
+            if ( state == DispacherState.IN_ADD ) {
+                dispatcherIndex++;
+                state = DispacherState.SCHEDULED;
+                System.out.println("scheduled dispatcher " + (dispatcherIndex - 1));
+            }
+            if ( ev.done )
+                return;
             ev.debugSeen = true;
             eventTick++;
             if ( ((idMask & ev.id) != 0 && ! ev.done) ) {
+                // standard processing
                 ev.done = true;
                 processEvent(ev);
             } else if ( ((transitionalIdMask & ev.id) != 0 ) ) {
                 if ( ev.done ) // has been processed by new handler
                 {
-//                    System.out.println("transition being cleared "+Long.toBinaryString(transitionalIdMask)+" evid "+Long.toBinaryString(ev.id));
-//                    System.out.println("                         "+Long.toBinaryString(idMask));
-                    transitionalIdMask = transitionalIdMask & ~ev.id; // clear from transitioinal
-//                    System.out.println("transition after cleared "+Long.toBinaryString(transitionalIdMask));
+                    // clear from transitional bit array. as further
+                    // events are handled by newly assigned one
+                    transitionalIdMask = transitionalIdMask & ~ev.id;
                 } else {
-//                    System.out.println("transitional sticky "+num);
+                    // matched transitional, keep processing events from
+                    // old events until new one took over
                     ev.done = true;
                     processEvent(ev);
                 }
-            } else if (num == dispatcherIndex-1 && idMask == 0 && transitionalIdMask == 0 ) {
-                removeCandidateCount++;
-                if ( removeCandidateCount > 10 ) {
-                    System.out.println("removed " + dispatcherIndex);
-                    dispatcherIndex--;
-                    disruptor.removeHandler(this);
+            }
+
+            if (state == DispacherState.IN_REMOVE ) {
+                if ( num < dispatcherIndex-1 ) {
+                    // new thread has been scheduled meanwhile
+                    state = DispacherState.SCHEDULED;
+                    System.out.println("remove reverted, another thread started " + num);
+                } else if (num >= dispatcherIndex ) {
+                    // num >= dispatcherIndex => another remove has happened. Error
+                    System.out.println("this should never happen");
+                    System.exit(-1);
+                } else if ( idMask != 0 ) {
+                    // new actors scheduled to this FIXME: what happens if tasks in transition are moved to dying handler, but dying handler does not see yet ?
+                    state = DispacherState.SCHEDULED;
+                    System.out.println("remove reverted, has new assignments " + num);
+                } else if ( transitionalIdMask != 0 ) {
+                    // still in transition. do nothing
+                } else {
+                    if ( transitionalIdMask == 0 && idMask == 0 && num == dispatcherIndex-1 ) {
+                        removeHandler();
+                    } else {
+                        System.out.println("unexpected state");
+                        System.exit(-1);
+                    }
                 }
             }
             if ( eventTick > 500 ) {
-//                dumpWorkers();
-                load /= 2;
+                load = 4*load/5; // fadeout
                 eventTick = 0;
             }
+        }
+
+        private void removeHandler() {
+            dispatcherIndex--;
+            System.out.println("removed " + num);
+            state = DispacherState.UNSCHEDULED;
+            disruptor.removeHandler(this);
         }
 
         private void processEvent(EventEntry ev) {
@@ -115,7 +153,6 @@ public class Scheduler {
             if ( profileTick > 100 ) {
                 profileTick = 0;
                 profiledRun(ev);
-
             } else {
                 ev.work();
             }
@@ -130,8 +167,9 @@ public class Scheduler {
             timeCounters[ev.nr] = (dur+timeCounters[ev.nr])/2;
             scheduleTick++;
             if ( scheduleTick > 4 ) {
-                if ( !ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*4/5) ) {
-                    emptyCount = 0;
+                //if ( !ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*2/3) )
+                {
+                    // if queue is filled more than 1/3, dispatch load
                     boolean isMaxThread = true;
                     for (int i = 0; i < dispatcherIndex; i++) {
                         DispatcherHandler handler = handlers[i];
@@ -161,21 +199,29 @@ public class Scheduler {
                     scheduleTick = 0;
                     if (num == 0) {
                         dispatcherScheduleTick++;
-                        if (dispatcherScheduleTick > 800) {
+                        if (dispatcherScheduleTick > 400) {
+                            // if rebalancing does not help (800 rounds of rebalance did not fix q)
+                            // and queue keeps growing => try get another thread
                             if (!ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize() / 2)) {
-                                scheduleDispatcher();
+                                scheduleDispatcher(false);
                             }
                             dispatcherScheduleTick = 0;
                         }
                     }
-                } else {
-                    if (num == dispatcherIndex-1) {
+                }
+
+                // try removing load
+                if (num > 0 && num == dispatcherIndex-1 && state != DispacherState.IN_ADD ) {
+                    if ( ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*2/3) ) {
                         emptyCount++;
-                        if (emptyCount > 10000) {
-                            //System.out.println("would remove");
+                        if (emptyCount > 100) {
+                            //                            if ( state == DispacherState.IN_REMOVE )
+                            //                                System.out.println("pending remove");
+                            //                            else
+                            //                                System.out.println("try remove "+num);
                             int actor2Move = Long.numberOfTrailingZeros(idMask);
-                            while ( actor2Move < 64 ) {
-                                DispatcherHandler newHandler = findIdleHandler(dispatcherIndex-1);
+                            while (actor2Move < 64) {
+                                DispatcherHandler newHandler = findIdleHandler(dispatcherIndex - 1);
                                 if (newHandler != this && newHandler != null) {
                                     movActor(actor2Move, newHandler);
                                     actor2Move = Long.numberOfTrailingZeros(idMask);
@@ -183,9 +229,12 @@ public class Scheduler {
                                     break;
                             }
                             emptyCount = 0;
+                            state = DispacherState.IN_REMOVE;
                         }
-                    }
+                    } else
+                        emptyCount = 0;
                 }
+
             }
         }
 
@@ -243,18 +292,28 @@ public class Scheduler {
         }
     }
 
-    void scheduleDispatcher() {
+    void scheduleDispatcher(boolean latched) {
         if ( dispatcherIndex < dispatchers.length ) {
-            final int di = dispatcherIndex++;
-            dispatchers[di].removeCandidateCount = 0;
-            CountDownLatch latch = new CountDownLatch(1);
-            executor.execute( () -> disruptor.addHandler(dispatchers[di],latch) );
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            System.out.println("try schedule dispatcher " + dispatcherIndex);
+            final int di = dispatcherIndex;
+            if ( dispatchers[di].state == DispacherState.IN_ADD ) {
+                System.out.println("schedule already underway "+di);
+                return;
             }
-            System.out.println("scheduled dispatcher " + (dispatcherIndex - 1));
+            dispatchers[di].state = DispacherState.IN_ADD;
+            dispatchers[di].emptyCount = 0;
+            CountDownLatch latch = latched ? new CountDownLatch(1) : null;
+            executor.execute( () -> disruptor.addHandler(dispatchers[di],latch) );
+            if ( latched ) {
+                try {
+                    latch.await();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                dispatcherIndex++;
+                dispatchers[di].state = DispacherState.SCHEDULED;
+                System.out.println("scheduled dispatcher " + (dispatcherIndex - 1));
+            }
         }
     }
 
@@ -291,15 +350,18 @@ public class Scheduler {
             if ( diff > 1000 ) {
                 System.out.println("Count:"+count*1000/diff+" "+diff+" spd "+speed);
 //                if ( (count%2) == 0 )
-                speed = speed + ((int)(Math.random()*11) - 5);
-                if ( speed > 70 ) {
-                    speed = 1;
-                    slowCount = 60; // 60 sec speed 1
-                }
-                if ( speed < 1 || slowCount > 0 ) {
-                    speed = 1;
-                    slowCount--;
-                }
+
+                speed++;
+//                speed = speed + ((int)(Math.random()*11) - 5);
+//                if ( speed > 70 ) {
+//                    speed = 1;
+//                    slowCount = 60; // 60 sec speed 1
+//                }
+//                if ( speed < 1 || slowCount > 0 ) {
+//                    speed = 1;
+//                    slowCount--;
+//                }
+
                 count = 0;
                 tim = System.currentTimeMillis();
             }

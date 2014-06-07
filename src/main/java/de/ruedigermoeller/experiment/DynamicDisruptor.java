@@ -26,7 +26,9 @@ public class DynamicDisruptor<T> {
         sequenceGroup.add(processor.getSequence());
         processor.getSequence().set(ringBuffer.getCursor());
         handlersWithProcessors.put(handler, processor);
-        latch.countDown();
+        if ( latch != null ) {
+            latch.countDown();
+        }
         processor.run();
     }
 
