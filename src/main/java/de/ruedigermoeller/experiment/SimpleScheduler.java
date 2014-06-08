@@ -20,12 +20,14 @@ public class SimpleScheduler {
         public long worknanos;
         public boolean done = true;                   // true if has been processed
         public boolean debugSeen = true;              // true if has been seen
+        public SimulateMemAccess simMem;
 
         public void work() {
             long sum = 0;
-            long max = worknanos / 10;
+            long max = worknanos / 30;
             for (int i = 0; i < max; i++ ) {
                 sum += i;
+                simMem.values[i&63] = (int) sum;
             }
             if ( Math.abs(sum) < 88 ) {
                 System.out.println("POK");
@@ -131,11 +133,10 @@ public class SimpleScheduler {
                 scheduleTick = 0;
                 if (num == 0) {
                     dispatcherScheduleTick++;
-                    if (dispatcherScheduleTick > 400) {
+                    if (dispatcherScheduleTick > 100) {
                         // if rebalancing does not help (800 rounds of rebalance did not fix q)
                         // and queue keeps growing => try get another thread
                         if (!ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize() / 2)) {
-                            System.out.println("try schedule dispatcher " + dispatcherIndex);
                             scheduleDispatcher(false);
                         }
                         dispatcherScheduleTick = 0;
@@ -190,6 +191,7 @@ public class SimpleScheduler {
 
     void scheduleDispatcher(boolean latched) {
         if ( dispatcherIndex < dispatchers.length ) {
+            System.out.println("try schedule dispatcher " + dispatcherIndex);
             final int di = dispatcherIndex;
             if ( dispatchers[di].state == SimpleDispacherState.IN_ADD ) {
                 System.out.println("schedule already underway "+di);
@@ -212,7 +214,7 @@ public class SimpleScheduler {
         }
     }
 
-    public void enqueueReq(int nr, long nanos) {
+    public void enqueueReq(int nr, long nanos, SimulateMemAccess simulateMemAccess) {
         final long seq = ringBuffer.next();
         final SimpleEventEntry requestEntry = ringBuffer.get(seq);
         if ( ! requestEntry.done ) {
@@ -222,7 +224,12 @@ public class SimpleScheduler {
         requestEntry.done = false;
         requestEntry.debugSeen = false;
         requestEntry.worknanos = nanos;
+        requestEntry.simMem = simulateMemAccess;
         ringBuffer.publish(seq);
+    }
+
+    static class SimulateMemAccess {
+        public int values[] = new int[64];
     }
 
     public static void main(String arg[]) {
@@ -230,10 +237,14 @@ public class SimpleScheduler {
         sched.initDisruptor();
         long tim = System.currentTimeMillis();
         int count = 0;
-        int speed = 1;
+        int speed = 200;
+        SimulateMemAccess mem[] = new SimulateMemAccess[64];
+        for (int i = 0; i < mem.length; i++) {
+            mem[i] = new SimulateMemAccess();
+        }
         while( true ) {
             int actorId = (int) (Math.random() * 64);
-            sched.enqueueReq(actorId, 250 * (10 + actorId * 10)); //*actorId
+            sched.enqueueReq(actorId, 250 * (10 + actorId * 10), mem[actorId]); //*actorId
             if ( (count%speed) == 0 ) {
                 LockSupport.parkNanos(100);
             }

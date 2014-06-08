@@ -16,7 +16,7 @@ public class Scheduler {
     public static final int PROFILE_THRESH  = 1000;                // when to run a call profiled (N'th) call
     public static final int REBALANCE_PER_PROFILETICK = 100;        // each N profile, do a rebalance on actors amongst live threads.
     public static final int EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD = 100; // how many times in a row 'empty' queue must occur to trigger remove
-    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 10; // how many times in a row 'full' queue must occur to trigger add
+    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 1; // how many times in a row 'full' queue must occur to trigger add
 
     public static final int EVENTTICK_RESET = 10000;  // when to akkumulate overall load
     public static final boolean BALANCE_DEBUG = false;
@@ -35,12 +35,14 @@ public class Scheduler {
         public long worknanos;
         public boolean done = true;                   // true if has been processed
         public boolean debugSeen = true;              // true if has been seen
+        private SimulateMemAccess1 sim;
 
         public void work() {
             long sum = 0;
-            long max = worknanos / 10;
+            long max = worknanos / 30;
             for (int i = 0; i < max; i++ ) {
                 sum += i;
+                sim.values[i&63] = (int) sum;
             }
             if ( Math.abs(sum) < 88 ) {
                 System.out.println("POK");
@@ -148,7 +150,7 @@ public class Scheduler {
                     emptyCount++;
                     if (state != DispacherState.IN_ADD) {
                         if (emptyCount > EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD) {
-                            triggerRemove();
+                            //triggerRemove();
                             emptyCount = 0;
                         }
                     }
@@ -312,7 +314,7 @@ public class Scheduler {
             }
             if (BALANCE_DEBUG)
                 System.out.println("try move "+actors2Move+" to "+newHandler.num);
-            disruptor.feedBackQueue.execute(() -> publishEvent(0,0, actors2Move, newHandler.num) );
+            disruptor.feedBackQueue.execute(() -> publishEvent(0,0, actors2Move, newHandler.num, null) );
         }
 
         private void dumpWorkers() {
@@ -382,7 +384,7 @@ public class Scheduler {
         }
     }
 
-    public void publishEvent(int nr, long nanos, long actors2Move, int targetNum) {
+    public void publishEvent(int nr, long nanos, long actors2Move, int targetNum, SimulateMemAccess1 simulateMemAccess1) {
         final long seq = ringBuffer.next();
         final EventEntry requestEntry = ringBuffer.get(seq);
         if ( ! requestEntry.done && requestEntry.nr != 99) {
@@ -396,7 +398,12 @@ public class Scheduler {
         requestEntry.worknanos = nanos;
         requestEntry.actorsToMove = actors2Move;
         requestEntry.targetNum = targetNum;
+        requestEntry.sim = simulateMemAccess1;
         ringBuffer.publish(seq);
+    }
+
+    static class SimulateMemAccess1 {
+        public int values[] = new int[64];
     }
 
     public static void main(String arg[]) {
@@ -404,10 +411,14 @@ public class Scheduler {
         sched.initDisruptor();
         long tim = System.currentTimeMillis();
         int count = 0;
-        int speed = 1;
+        int speed = 200;
+        SimulateMemAccess1 mem[] = new SimulateMemAccess1[64];
+        for (int i = 0; i < mem.length; i++) {
+            mem[i] = new SimulateMemAccess1();
+        }
         while( true ) {
             int actorId = (int) (Math.random() * 64);
-            sched.publishEvent(actorId, 250 * (10 + actorId * 10),0,-1); //*actorId
+            sched.publishEvent(actorId, 250 * (10 + actorId * 10),0,-1,mem[actorId]); //*actorId
             if ( (count%speed) == 0 ) {
                 LockSupport.parkNanos(100);
             }
@@ -418,7 +429,7 @@ public class Scheduler {
                 System.out.println("Count:"+count*1000/diff+" "+diff+" spd "+speed);
 //                if ( (count%2) == 0 )
 
-                speed++;
+                speed+=2;
 //                speed = speed + ((int)(Math.random()*11) - 5);
 //                if ( speed > 70 ) {
 //                    speed = 1;
