@@ -2,9 +2,12 @@ package de.ruedigermoeller.experiment;
 
 import com.lmax.disruptor.*;
 
+import java.lang.reflect.Executable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Created by ruedi on 06.06.14.
@@ -14,8 +17,10 @@ public class DynamicDisruptor<T> {
     private final SequenceGroup sequenceGroup = new SequenceGroup();
     private final Map<EventHandler<T>, BatchEventProcessor<T>> handlersWithProcessors = new ConcurrentHashMap<>();
 
+    public Executor feedBackQueue = Executors.newSingleThreadExecutor();
+
     public DynamicDisruptor(EventFactory<T> fac, int bufferSize) {
-        ringBuffer = RingBuffer.createMultiProducer(fac, bufferSize, new SleepingWaitStrategy());
+        ringBuffer = RingBuffer.createMultiProducer(fac, bufferSize, new BusySpinWaitStrategy());
         ringBuffer.addGatingSequences(sequenceGroup);
     }
 
