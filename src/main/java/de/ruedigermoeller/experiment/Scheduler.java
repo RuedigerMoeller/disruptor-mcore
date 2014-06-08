@@ -13,10 +13,10 @@ import java.util.concurrent.locks.LockSupport;
  */
 public class Scheduler {
 
-    public static final int PROFILE_THRESH  = 100;                // when to run a call profiled (N'th) call
-    public static final int REBALANCE_PER_PROFILETICK = 1000;        // each N profile, do a rebalance on actors amongst live threads.
-    public static final int EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD = 50; // how many times in a row 'empty' queue must occur to trigger remove
-    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 20; // how many times in a row 'full' queue must occur to trigger add
+    public static final int PROFILE_THRESH  = 1000;                // when to run a call profiled (N'th) call
+    public static final int REBALANCE_PER_PROFILETICK = 100;        // each N profile, do a rebalance on actors amongst live threads.
+    public static final int EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD = 100; // how many times in a row 'empty' queue must occur to trigger remove
+    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 10; // how many times in a row 'full' queue must occur to trigger add
 
     public static final int EVENTTICK_RESET = 10000;  // when to akkumulate overall load
     public static final boolean BALANCE_DEBUG = false;
@@ -96,22 +96,7 @@ public class Scheduler {
             // check for movement
             final long actorsToMove = ev.actorsToMove;
             if ( actorsToMove != 0 ) {
-                final int targetNum = ev.targetNum;
-                if ( targetNum == num ) {
-                    if ( BALANCE_DEBUG )
-                        System.out.println("moved actor "+actorsToMove+" to "+num);
-                    if ( state == DispacherState.IN_REMOVE ) {
-                        System.out.println("got assignement in_remove "+state);
-                    }
-                    idMask |= actorsToMove;
-                } else if ( targetNum >= 0 ) {
-                    idMask &= ~actorsToMove;
-                    timeCounters[targetNum] = 0;
-                } else {
-                    System.out.println("error targetNum="+targetNum);
-                    System.exit(1);
-                }
-                ev.done = true;
+                handleMove(ev, actorsToMove);
                 return;
             }
 
@@ -141,30 +126,54 @@ public class Scheduler {
             if ( isSchedulingHandler() ) {
                 threadScheduleTick++;
                 if ( threadScheduleTick > 10000 ) {
-                    threadScheduleTick = 0;
-                    // if rebalancing does not help (N rounds of rebalance did not fix q)
-                    // and queue keeps growing => try get another thread
-                    if ( dispatcherIndex < MAX_THREADS && !ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize() / 2)) {
-                        emptyCount = 0;
-                        fullCount++;
-                        if ( fullCount > FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD ) {
-                            scheduleDispatcher(false);
-                            fullCount = 0;
-                        }
-                    } else {
-                        fullCount = 0;
-                        if ( ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*2/3) ) {
-                            emptyCount++;
-                            if (state != DispacherState.IN_ADD) {
-                                if (emptyCount > EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD) {
-                                    triggerRemove();
-                                    emptyCount = 0;
-                                }
-                            }
+                    handleThreadScheduling();
+                }
+            }
+        }
+
+        private void handleThreadScheduling() {
+            threadScheduleTick = 0;
+            // if rebalancing does not help (N rounds of rebalance did not fix q)
+            // and queue keeps growing => try get another thread
+            if ( dispatcherIndex < MAX_THREADS && !ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize() / 2)) {
+                emptyCount = 0;
+                fullCount++;
+                if ( fullCount > FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD ) {
+                    scheduleDispatcher(false);
+                    fullCount = 0;
+                }
+            } else {
+                fullCount = 0;
+                if ( ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*2/3) ) {
+                    emptyCount++;
+                    if (state != DispacherState.IN_ADD) {
+                        if (emptyCount > EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD) {
+                            triggerRemove();
+                            emptyCount = 0;
                         }
                     }
                 }
             }
+        }
+
+        private void handleMove(EventEntry ev, long actorsToMove) {
+            final int targetNum = ev.targetNum;
+            if ( targetNum == num ) {
+                if ( BALANCE_DEBUG )
+                    System.out.println("moved actor "+actorsToMove+" to "+num);
+                if ( state == DispacherState.IN_REMOVE ) {
+                    System.out.println("got assignement in_remove "+state);
+                }
+                idMask |= actorsToMove;
+            } else if ( targetNum >= 0 ) {
+                idMask &= ~actorsToMove;
+                timeCounters[targetNum] = 0;
+            } else {
+                System.out.println("error targetNum="+targetNum);
+                System.exit(1);
+            }
+            ev.done = true;
+            return;
         }
 
         boolean isSchedulingHandler() {
@@ -321,7 +330,7 @@ public class Scheduler {
 
     void initDisruptor() {
         executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
-        disruptor = new DynamicDisruptor( () -> new EventEntry(), 1024*512); // requires 4 MB l3 cache
+        disruptor = new DynamicDisruptor( () -> new EventEntry(), 1024*128); // requires 4 MB l3 cache
         handlers = new DispatcherHandler[MAX_THREADS];
         for (int i = 0; i < handlers.length; i++) {
             handlers[i] = new DispatcherHandler(i);

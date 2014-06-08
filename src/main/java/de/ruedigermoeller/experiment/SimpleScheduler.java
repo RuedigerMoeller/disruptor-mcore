@@ -172,7 +172,7 @@ public class SimpleScheduler {
     void initDisruptor() {
         int MAX_THREADS = 16;
         executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
-        disruptor = new DynamicDisruptor( () -> new SimpleEventEntry(), 1024*512); // requires 4 MB l3 cache
+        disruptor = new DynamicDisruptor( () -> new SimpleEventEntry(), 1024*128);
         dispatchers = new SimpleDispatcherHandler[MAX_THREADS];
         for (int i = 0; i < dispatchers.length; i++) {
             dispatchers[i] = new SimpleDispatcherHandler(i,dispatchers);
