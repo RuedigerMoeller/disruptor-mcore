@@ -171,7 +171,7 @@ public class SimpleScheduler {
     RingBuffer<SimpleEventEntry> ringBuffer;
 
     void initDisruptor() {
-        int MAX_THREADS = 16;
+        int MAX_THREADS = 1;
         executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
         disruptor = new DynamicDisruptor( () -> new SimpleEventEntry(), 1024*128);
         dispatchers = new SimpleDispatcherHandler[MAX_THREADS];
@@ -246,7 +246,7 @@ public class SimpleScheduler {
             int actorId = (int) (Math.random() * 64);
             sched.enqueueReq(actorId, 250 * (10 + actorId * 10), mem[actorId]); //*actorId
             if ( (count%speed) == 0 ) {
-                LockSupport.parkNanos(100);
+//                LockSupport.parkNanos(100);
             }
             count++;
             long diff = System.currentTimeMillis() - tim;

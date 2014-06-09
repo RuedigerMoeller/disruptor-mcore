@@ -15,7 +15,7 @@ import java.util.concurrent.Executors;
 public class DynamicDisruptor<T> {
     private final RingBuffer<T> ringBuffer;
     private final SequenceGroup sequenceGroup = new SequenceGroup();
-    private final Map<EventHandler<T>, BatchEventProcessor<T>> handlersWithProcessors = new ConcurrentHashMap<>();
+    private final Map<EventHandler<T>, MyBatchEventProcessor<T>> handlersWithProcessors = new ConcurrentHashMap<>();
 
     public Executor feedBackQueue = Executors.newSingleThreadExecutor();
 
@@ -24,9 +24,13 @@ public class DynamicDisruptor<T> {
         ringBuffer.addGatingSequences(sequenceGroup);
     }
 
+    SequenceBarrier barrier = null;
     public void addHandler(EventHandler<T> handler, CountDownLatch latch) {
-        SequenceBarrier barrier = ringBuffer.newBarrier();
-        BatchEventProcessor<T> processor = new BatchEventProcessor<>(ringBuffer, barrier, handler);
+//        SequenceBarrier barrier = null;
+        if (barrier==null) {
+            barrier = ringBuffer.newBarrier();
+        }
+        MyBatchEventProcessor<T> processor = new MyBatchEventProcessor<>(ringBuffer, barrier, handler);
         processor.getSequence().set(barrier.getCursor());
         sequenceGroup.add(processor.getSequence());
         processor.getSequence().set(ringBuffer.getCursor());
@@ -37,8 +41,12 @@ public class DynamicDisruptor<T> {
         processor.run();
     }
 
+    public MyBatchEventProcessor<T> getProcessor(EventHandler<T> handler) {
+        return handlersWithProcessors.get(handler);
+    }
+
     public void removeHandler(EventHandler<T> handler) {
-        BatchEventProcessor<T> processor = handlersWithProcessors.remove(handler);
+        MyBatchEventProcessor<T> processor = handlersWithProcessors.remove(handler);
         processor.halt();
         sequenceGroup.remove(processor.getSequence());
     }

@@ -16,36 +16,44 @@ public class Scheduler {
     public static final int PROFILE_THRESH  = 1000;                // when to run a call profiled (N'th) call
     public static final int REBALANCE_PER_PROFILETICK = 100;        // each N profile, do a rebalance on actors amongst live threads.
     public static final int EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD = 100; // how many times in a row 'empty' queue must occur to trigger remove
-    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 1; // how many times in a row 'full' queue must occur to trigger add
+    public static final int FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD = 20; // how many times in a row 'full' queue must occur to trigger add
 
     public static final int EVENTTICK_RESET = 10000;  // when to akkumulate overall load
     public static final boolean BALANCE_DEBUG = false;
-    public static final int MAX_THREADS = 16;
+    public static final int MAX_THREADS = 6;
 
     private ThreadPoolExecutor executor;
     private DynamicDisruptor disruptor;
+    long lastAdded;
+
+    static volatile long counters[] = new long[64];
 
     static class EventEntry {
 
         public long actorsToMove;
+        public long handlersHaveMoved;  // ensure move is processed once
         public int  targetNum = -1;
 
         public long id;
         public int nr=99;                             // marker for init
         public long worknanos;
-        public boolean done = true;                   // true if has been processed
+        public volatile boolean done = true;                   // true if has been processed
         public boolean debugSeen = true;              // true if has been seen
         private SimulateMemAccess1 sim;
+        long sequence;
 
         public void work() {
+            if ( counters[nr] != sequence-1 ) {
+                System.out.println("seq error in " + nr + " seqs new:" + sequence + " old:" + counters[nr]);
+//                System.exit(0);
+                return;
+            }
+            counters[nr] = sequence;
             long sum = 0;
             long max = worknanos / 30;
             for (int i = 0; i < max; i++ ) {
                 sum += i;
                 sim.values[i&63] = (int) sum;
-            }
-            if ( Math.abs(sum) < 88 ) {
-                System.out.println("POK");
             }
 //            LockSupport.parkNanos(worknanos);
         }
@@ -60,7 +68,7 @@ public class Scheduler {
 
     class DispatcherHandler implements EventHandler<EventEntry> {
 
-        public long idMask;             // bitmask which actors to process
+        public volatile long idMask;             // bitmask which actors to process
 
         long timeCounters[] = new long[64]; // holds profiling data
         long load = 0;                      // acummulated load of handler
@@ -142,15 +150,16 @@ public class Scheduler {
                 fullCount++;
                 if ( fullCount > FULL_QUEUE_TICK_THRESH_FOR_ADD_THREAD ) {
                     scheduleDispatcher(false);
+                    lastAdded = System.currentTimeMillis();
                     fullCount = 0;
                 }
             } else {
                 fullCount = 0;
-                if ( ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*2/3) ) {
+                if ( ringBuffer.hasAvailableCapacity(ringBuffer.getBufferSize()*5/6) ) {
                     emptyCount++;
-                    if (state != DispacherState.IN_ADD) {
+                    if (state != DispacherState.IN_ADD && System.currentTimeMillis()-lastAdded > 5000) {
                         if (emptyCount > EMPTY_QUEUE_TICK_THRESH_FOR_REMOVE_THREAD) {
-                            //triggerRemove();
+//                            triggerRemove();
                             emptyCount = 0;
                         }
                     }
@@ -158,7 +167,13 @@ public class Scheduler {
             }
         }
 
-        private void handleMove(EventEntry ev, long actorsToMove) {
+        private void handleMove(EventEntry ev, long actorsToMove) throws AlertException {
+            final MyBatchEventProcessor processor = disruptor.getProcessor(this);
+            long me = 1l<<num;
+            if ( (ev.handlersHaveMoved&me) != 0 )
+                return;
+            ev.handlersHaveMoved |= me;
+//            System.out.println("proc "+processor.getSequence().get()+" min "+ringBuffer.getMinimumGatingSequence()+" cu "+ringBuffer.getCursor());
             final int targetNum = ev.targetNum;
             if ( targetNum == num ) {
                 if ( BALANCE_DEBUG )
@@ -175,7 +190,8 @@ public class Scheduler {
                 System.exit(1);
             }
             ev.done = true;
-            return;
+            processor.getSequence().set(ringBuffer.getMinimumGatingSequence());
+            throw AlertException.INSTANCE;
         }
 
         boolean isSchedulingHandler() {
@@ -290,16 +306,16 @@ public class Scheduler {
             // distribution of outlier-actors
             long newIdMasks[] = new long[maxDispatcher];
             int roundRobinIdx = 0;
-            for (int i = 0; i < cumCounters.length; i++) {
-                long[] cumCounter = cumCounters[i];
-                newIdMasks[roundRobinIdx] |= 1l<<cumCounter[1];
-                roundRobinIdx = (roundRobinIdx+1)% maxDispatcher;
+            for (long[] cumCounter : cumCounters) {
+                newIdMasks[roundRobinIdx] |= 1l << cumCounter[1];
+                roundRobinIdx = (roundRobinIdx + 1) % maxDispatcher;
             }
 
             long accum = 0;
             for (int i = 0; i < newIdMasks.length; i++) {
                 long newIdMask = newIdMasks[i];
                 movActor(newIdMask,handlers[i]);
+//                handlers[i].idMask = newIdMask;
                 accum |= newIdMask;
             }
             if ( accum != -1 ) {
@@ -314,12 +330,11 @@ public class Scheduler {
             }
             if (BALANCE_DEBUG)
                 System.out.println("try move "+actors2Move+" to "+newHandler.num);
-            disruptor.feedBackQueue.execute(() -> publishEvent(0,0, actors2Move, newHandler.num, null) );
+            disruptor.feedBackQueue.execute(() -> publishEvent(0,0, actors2Move, newHandler.num, null, 0) );
         }
 
         private void dumpWorkers() {
-            for (int i = 0; i < handlers.length; i++) {
-                DispatcherHandler handler = handlers[i];
+            for (DispatcherHandler handler : handlers) {
                 System.out.println(handler);
             }
         }
@@ -331,7 +346,7 @@ public class Scheduler {
     RingBuffer<EventEntry> ringBuffer;
 
     void initDisruptor() {
-        executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+        executor = (ThreadPoolExecutor) Executors.newCachedThreadPool( (r)-> new Thread(r,"disruptor") );
         disruptor = new DynamicDisruptor( () -> new EventEntry(), 1024*128); // requires 4 MB l3 cache
         handlers = new DispatcherHandler[MAX_THREADS];
         for (int i = 0; i < handlers.length; i++) {
@@ -384,13 +399,14 @@ public class Scheduler {
         }
     }
 
-    public void publishEvent(int nr, long nanos, long actors2Move, int targetNum, SimulateMemAccess1 simulateMemAccess1) {
+    public void publishEvent(int nr, long nanos, long actors2Move, int targetNum, SimulateMemAccess1 simulateMemAccess1, long l) {
         final long seq = ringBuffer.next();
         final EventEntry requestEntry = ringBuffer.get(seq);
         if ( ! requestEntry.done && requestEntry.nr != 99) {
             System.out.println("unprocessed event !");
             System.exit(1);
         }
+        requestEntry.handlersHaveMoved = 0;
         requestEntry.nr = nr;
         requestEntry.done = false;
         requestEntry.debugSeen = false;
@@ -399,6 +415,7 @@ public class Scheduler {
         requestEntry.actorsToMove = actors2Move;
         requestEntry.targetNum = targetNum;
         requestEntry.sim = simulateMemAccess1;
+        requestEntry.sequence = l;
         ringBuffer.publish(seq);
     }
 
@@ -407,38 +424,37 @@ public class Scheduler {
     }
 
     public static void main(String arg[]) {
+        long sequences[] = new long[64];
         Scheduler sched = new Scheduler();
         sched.initDisruptor();
         long tim = System.currentTimeMillis();
-        int count = 0;
-        int speed = 200;
+        long count = 0;
+        int speed = 300;
         SimulateMemAccess1 mem[] = new SimulateMemAccess1[64];
         for (int i = 0; i < mem.length; i++) {
             mem[i] = new SimulateMemAccess1();
         }
         while( true ) {
             int actorId = (int) (Math.random() * 64);
-            sched.publishEvent(actorId, 250 * (10 + actorId * 10),0,-1,mem[actorId]); //*actorId
+            sched.publishEvent(actorId, 250 * (10 + actorId * 10),0,-1,mem[actorId],++sequences[actorId]); //*actorId
             if ( (count%speed) == 0 ) {
-                LockSupport.parkNanos(100);
+                LockSupport.parkNanos(1);
             }
             count++;
             long diff = System.currentTimeMillis() - tim;
             int slowCount = 0;
             if ( diff > 1000 ) {
                 System.out.println("Count:"+count*1000/diff+" "+diff+" spd "+speed);
-//                if ( (count%2) == 0 )
-
-                speed+=2;
-//                speed = speed + ((int)(Math.random()*11) - 5);
-//                if ( speed > 70 ) {
-//                    speed = 1;
-//                    slowCount = 60; // 60 sec speed 1
-//                }
-//                if ( speed < 1 || slowCount > 0 ) {
-//                    speed = 1;
-//                    slowCount--;
-//                }
+//                speed+=1;
+                speed = speed + ((int)(Math.random()*91) - 30);
+                if ( speed > 2000 ) {
+                    speed = 100;
+                    slowCount = 60; // 60 sec speed 1
+                }
+                if ( speed < 1 || slowCount > 0 ) {
+                    speed = 100;
+                    slowCount--;
+                }
 
                 count = 0;
                 tim = System.currentTimeMillis();
